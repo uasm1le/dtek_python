@@ -13,7 +13,7 @@ if base_env.exists():
     load_dotenv(str(base_env), override=True)
 
 # 2. Load mode-specific .env based on APP_MODE
-app_mode = os.getenv('APP_MODE', 'development')
+app_mode = os.getenv('APP_MODE', 'test')
 if app_mode == 'test':
     test_env = PROJECT_ROOT / '.env.test'
     if test_env.exists():
