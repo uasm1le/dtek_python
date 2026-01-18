@@ -43,6 +43,7 @@ env/
 .power_status
 *.log
 /logs/
+power_monitor.db
 
 # Testing
 .pytest_cache/

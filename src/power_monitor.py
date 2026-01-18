@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 import httpx
 
 from .telegram_bot import TelegramBot
+from .database import PowerMonitorDB
 
 
 class PowerMonitor:
@@ -20,7 +21,7 @@ class PowerMonitor:
     - 10-minute draft mode to confirm power outages
     - Prevents false positives from brief interruptions
     - Sends notifications to Telegram
-    - Saves status to JSON file for persistence
+    - Saves events to SQLite database
     """
 
     # 10 minutes confirmation delay
@@ -31,6 +32,7 @@ class PowerMonitor:
         Initialize Power Monitor.
         """
         self.telegram_bot = TelegramBot()
+        self.db = PowerMonitorDB()
         
         # Get credentials from environment
         self.access_token = os.getenv('ewelink_accessToken')
@@ -233,6 +235,14 @@ class PowerMonitor:
             duration_str = self.format_duration(duration)
             message = f"💡 {time_str} Юху! Світло повернулося!\n⏱️ Було відсутнє {duration_str}"
             
+            # Save to database
+            self.db.add_event(
+                event_type='online',
+                timestamp=current_status['timestamp'],
+                duration_seconds=duration,
+                message=message
+            )
+            
             for chat_id in self.power_chat_ids:
                 await self.telegram_bot.send_message(
                     text=message,
@@ -303,6 +313,15 @@ class PowerMonitor:
                 duration = current_status['timestamp'] - last_status.get('status_changed_at', current_status['timestamp'])
                 duration_str = self.format_duration(duration)
                 message = f"🔦 {time_str} Йой… Халепа, знову без світла 😒\n⏱️ Було наявне {duration_str}"
+                
+                # Save to database
+                self.db.add_event(
+                    event_type='offline',
+                    timestamp=current_status['timestamp'],
+                    duration_seconds=duration,
+                    message=message,
+                    draft_confirmed=True
+                )
                 
                 for chat_id in self.power_chat_ids:
                     await self.telegram_bot.send_message(
