@@ -53,6 +53,21 @@ class PowerMonitorDB:
                 )
             ''')
 
+            # User settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    reminders_enabled BOOLEAN DEFAULT 0,
+                    reminder_schedule_today TEXT DEFAULT '09:00',
+                    reminder_schedule_tomorrow TEXT DEFAULT '09:00',
+                    notifications_enabled BOOLEAN DEFAULT 1,
+                    notification_chats TEXT DEFAULT '[]',
+                    power_monitor_enabled BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
             # Create index for faster queries
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_power_events_timestamp
@@ -295,3 +310,107 @@ class PowerMonitorDB:
         if self.db_path.exists():
             return self.db_path.stat().st_size
         return 0
+
+    # ==================== USER SETTINGS ====================
+
+    def get_user_settings(self, user_id: int) -> Dict:
+        """Get settings for user."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT * FROM user_settings WHERE user_id = ?', (user_id,))
+            result = cursor.fetchone()
+
+            if result:
+                import json
+                settings = dict(result)
+                # Parse JSON field
+                settings['notification_chats'] = json.loads(settings['notification_chats'])
+                return settings
+            else:
+                # Create default settings
+                return self.create_user_settings(user_id)
+
+    def create_user_settings(self, user_id: int) -> Dict:
+        """Create default settings for new user."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT OR IGNORE INTO user_settings
+                (user_id, reminders_enabled, reminder_schedule_today, 
+                 reminder_schedule_tomorrow, notifications_enabled, power_monitor_enabled)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, False, '09:00', '09:00', True, True))
+
+            conn.commit()
+
+        return self.get_user_settings(user_id)
+
+    def update_user_settings(self, user_id: int, **kwargs) -> Dict:
+        """Update user settings."""
+        import json
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Build dynamic UPDATE query
+            fields = []
+            values = []
+
+            for key, value in kwargs.items():
+                if key == 'notification_chats':
+                    value = json.dumps(value)
+                fields.append(f"{key} = ?")
+                values.append(value)
+
+            if not fields:
+                return self.get_user_settings(user_id)
+
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            query = f"UPDATE user_settings SET {', '.join(fields)} WHERE user_id = ?"
+            values.append(user_id)
+
+            cursor.execute(query, values)
+            conn.commit()
+
+        return self.get_user_settings(user_id)
+
+    def set_reminders_enabled(self, user_id: int, enabled: bool):
+        """Enable/disable reminders for user."""
+        return self.update_user_settings(user_id, reminders_enabled=enabled)
+
+    def set_reminder_schedule_today(self, user_id: int, time: str):
+        """Set reminder time for today."""
+        return self.update_user_settings(user_id, reminder_schedule_today=time)
+
+    def set_reminder_schedule_tomorrow(self, user_id: int, time: str):
+        """Set reminder time for tomorrow."""
+        return self.update_user_settings(user_id, reminder_schedule_tomorrow=time)
+
+    def set_power_monitor_enabled(self, user_id: int, enabled: bool):
+        """Enable/disable power monitor notifications for user."""
+        return self.update_user_settings(user_id, power_monitor_enabled=enabled)
+
+    def set_notifications_enabled(self, user_id: int, enabled: bool):
+        """Enable/disable notifications for user."""
+        return self.update_user_settings(user_id, notifications_enabled=enabled)
+
+    def add_notification_chat(self, user_id: int, chat_id: int):
+        """Add notification chat for user."""
+        settings = self.get_user_settings(user_id)
+        chats = settings['notification_chats']
+
+        if chat_id not in chats:
+            chats.append(chat_id)
+            self.update_user_settings(user_id, notification_chats=chats)
+
+    def remove_notification_chat(self, user_id: int, chat_id: int):
+        """Remove notification chat for user."""
+        settings = self.get_user_settings(user_id)
+        chats = settings['notification_chats']
+
+        if chat_id in chats:
+            chats.remove(chat_id)
+            self.update_user_settings(user_id, notification_chats=chats)
